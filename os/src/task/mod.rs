@@ -14,9 +14,11 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::config::MAX_SYSCALL_NUM;
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -54,6 +56,10 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            //在初始化的时候初始化时间
+            start_time: 0,
+            //初始化系统调用的次数
+            call_count:[0;MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -80,6 +86,8 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
+        //初始化记录时间
+        task0.start_time = get_time_ms();
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -95,6 +103,8 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_status = TaskStatus::Ready;
+        //暂停的时候记录时间
+        //inner.tasks[current].time = get_time_ms() - inner.tasks[current].start_time;
     }
 
     /// Change the status of current `Running` task into `Exited`.
@@ -102,6 +112,8 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_status = TaskStatus::Exited;
+        //结束的时候记录时间
+        //inner.tasks[current].time = get_time_ms() - inner.tasks[current].start_time;
     }
 
     /// Find next task to run and return task id.
@@ -115,6 +127,29 @@ impl TaskManager {
             .find(|id| inner.tasks[*id].task_status == TaskStatus::Ready)
     }
 
+    ///获取系统调用次数数组
+    pub fn get_sys_call(&self) -> [u32; MAX_SYSCALL_NUM]{
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].call_count
+    }
+    ///在每次系统调用时都为call_count+1
+    pub fn sys_call_add(&self, num: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if inner.tasks[current].task_status == TaskStatus::Running {
+            inner.tasks[current].call_count[num] += 1;
+        }
+    }
+    ///获取运行时间
+    pub fn get_total_time(&self) -> usize{
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let c_time ;
+        //获取该系统调用时的总时间
+        c_time = get_time_ms() - inner.tasks[current].start_time;
+        c_time
+    }
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
@@ -122,6 +157,10 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            //如果该任务第一次被调度，则设置start_time
+            if inner.tasks[next].start_time == 0{
+                inner.tasks[next].start_time = get_time_ms();
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -168,4 +207,16 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+///为该系统调用号+1
+pub fn sys_call_add(num:usize){
+    TASK_MANAGER.sys_call_add(num);
+}
+///获取总时间
+pub fn get_total_time() -> usize{
+    TASK_MANAGER.get_total_time()
+}
+///获取sys_call数组
+pub fn get_sys_call() -> [u32; MAX_SYSCALL_NUM]{
+    TASK_MANAGER.get_sys_call()
 }
