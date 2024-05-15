@@ -262,6 +262,14 @@ impl MemorySet {
             false
         }
     }
+
+    ///新建一个堆区
+    pub fn add_heap_area(&mut self, start: VirtAddr, new_end: VirtAddr,permission: MapPermission){
+        self.push(
+            MapArea::new(start, new_end, MapType::Framed, permission),
+            None,
+        );
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

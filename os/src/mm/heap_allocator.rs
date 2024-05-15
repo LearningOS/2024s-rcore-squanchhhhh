@@ -1,5 +1,5 @@
 //! The global allocator
-use crate::config::KERNEL_HEAP_SIZE;
+use crate::config::KERNEL_HEAP_SIZE; //pub const KERNEL_HEAP_SIZE: usize = 0x200_0000;
 use buddy_system_allocator::LockedHeap;
 
 #[global_allocator]

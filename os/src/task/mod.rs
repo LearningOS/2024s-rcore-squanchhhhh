@@ -13,7 +13,8 @@ mod context;
 mod switch;
 #[allow(clippy::module_inception)]
 mod task;
-
+use crate::mm::VirtAddr;
+use crate::mm::MapPermission;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
@@ -55,6 +56,7 @@ lazy_static! {
         let num_app = get_num_app();
         println!("num_app = {}", num_app);
         let mut tasks: Vec<TaskControlBlock> = Vec::new();
+        //加载全部的应用程序数据到tasks中
         for i in 0..num_app {
             tasks.push(TaskControlBlock::new(get_app_data(i), i));
         }
@@ -125,6 +127,14 @@ impl TaskManager {
         let inner = self.inner.exclusive_access();
         inner.tasks[inner.current_task].get_trap_cx()
     }
+    fn mmap(&self,start: usize, len: usize, port: usize){
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        let memset = inner.tasks[current_task].get_memset();
+        let mut permission = MapPermission::from_bits((port as u8) << 1).unwrap();
+        permission.set(MapPermission::U, true);
+        memset.insert_framed_area(VirtAddr::from(start), VirtAddr::from(start+len), permission);
+    }
 
     /// Change the current 'Running' task's program break
     pub fn change_current_program_brk(&self, size: i32) -> Option<usize> {
@@ -165,7 +175,10 @@ pub fn run_first_task() {
 fn run_next_task() {
     TASK_MANAGER.run_next_task();
 }
-
+///mmap
+pub fn do_mmap(start:usize, len: usize, port: usize){
+    TASK_MANAGER.mmap(start, len, port);
+}
 /// Change the status of current `Running` task into `Ready`.
 fn mark_current_suspended() {
     TASK_MANAGER.mark_current_suspended();
