@@ -2,9 +2,11 @@
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,do_mmap,
+        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,do_mmap,sys_call_add,get_sys_call,get_total_time
     },
 };
+use core::slice;
+use core::mem;
 use crate::timer::get_time_us;
 use crate::mm::translated_byte_buffer;
 use crate::task::current_user_token;
@@ -30,6 +32,7 @@ pub struct TaskInfo {
 /// task exits and submit an exit code
 pub fn sys_exit(_exit_code: i32) -> ! {
     trace!("kernel: sys_exit");
+    sys_call_add(93);
     exit_current_and_run_next();
     panic!("Unreachable in sys_exit!");
 }
@@ -37,6 +40,7 @@ pub fn sys_exit(_exit_code: i32) -> ! {
 /// current task gives up resources for other tasks
 pub fn sys_yield() -> isize {
     trace!("kernel: sys_yield");
+    sys_call_add(124);
     suspend_current_and_run_next();
     0
 }
@@ -46,6 +50,7 @@ pub fn sys_yield() -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
+    sys_call_add(169);
     let us = get_time_us();
     //*_ts的地址是虚拟地址，要根据虚拟地址获取物理地址，然后修改物理地址里面的值 
     let buffers = translated_byte_buffer(current_user_token(), _ts as *const u8, size_of::<TimeVal>());
@@ -67,28 +72,62 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
-    -1
+    if _ti.is_null() {
+        return -1;
+    }
+    trace!("kernel: sys_task_info");
+    sys_call_add(410);
+    let buffers = translated_byte_buffer(current_user_token(), _ti as *const u8, mem::size_of::<TaskInfo>());
+    let task_info = TaskInfo {
+        status: TaskStatus::Running,
+        syscall_times: get_sys_call(),  
+        time: get_total_time(),
+    };
+    let task_info_bytes: &[u8] = unsafe {
+        slice::from_raw_parts(&task_info as *const _ as *const u8, size_of::<TaskInfo>())
+    };
+    let mut task_info_ptr = task_info_bytes.as_ptr();
+    for buffer in buffers {
+        unsafe {
+            task_info_ptr.copy_to(buffer.as_mut_ptr(), buffer.len());
+            task_info_ptr = task_info_ptr.add(buffer.len());
+        }
+    }
+
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 ///start 需要映射的虚存起始地址，要求按页对齐
 ///len 映射字节长度，可以为 0
 ///port：第 0 位表示是否可读，第 1 位表示是否可写，第 2 位表示是否可执行。其他位无效且必须为 
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    do_mmap(_start,_len,_port);
+    sys_call_add(222);
+    // 检查 port 的有效性
+    if port & !0b111 != 0 {
+        panic!("port error!");
+    }
+    // 计算需要的页数
+    let num_pages = if len == 0 {
+        0
+    } else {
+        (len + 4095) / 4096
+    };
+    do_mmap(start, num_pages, port);
     0
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+    sys_call_add(215);
     -1
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
     trace!("kernel: sys_sbrk");
+    sys_call_add(214);
     if let Some(old_brk) = change_program_brk(size) {
         old_brk as isize
     } else {

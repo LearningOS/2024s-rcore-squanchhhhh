@@ -262,14 +262,14 @@ impl MemorySet {
             false
         }
     }
-
-    ///新建一个堆区
-    pub fn add_heap_area(&mut self, start: VirtAddr, new_end: VirtAddr,permission: MapPermission){
-        self.push(
-            MapArea::new(start, new_end, MapType::Framed, permission),
-            None,
-        );
+    ///获取每个区域的开始地址
+    pub fn get_areas(&self) -> Vec<VPNRange> {
+        self.areas
+            .iter()
+            .map(|value| value.vpn_range)
+            .collect()
     }
+
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

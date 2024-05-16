@@ -8,7 +8,8 @@
 //!
 //! Be careful when you see `__switch` ASM function in `switch.S`. Control flow around this function
 //! might not be what you expect.
-
+use crate::timer::get_time_ms;
+use crate::config::MAX_SYSCALL_NUM;
 mod context;
 mod switch;
 #[allow(clippy::module_inception)]
@@ -127,13 +128,22 @@ impl TaskManager {
         let inner = self.inner.exclusive_access();
         inner.tasks[inner.current_task].get_trap_cx()
     }
-    fn mmap(&self,start: usize, len: usize, port: usize){
+    fn mmap(&self,start: usize, len: usize, port: usize) -> isize{
         let mut inner = self.inner.exclusive_access();
         let current_task = inner.current_task;
         let memset = inner.tasks[current_task].get_memset();
         let mut permission = MapPermission::from_bits((port as u8) << 1).unwrap();
         permission.set(MapPermission::U, true);
+        //start向下取整
+        let page_floor = VirtAddr(start).floor();
+        //len向上取整
+        let page_ceil = VirtAddr(start+len).ceil();
+        //判断区间是否重合
+        if memset.get_areas().iter().any(|area| area.get_start()<=page_ceil&&area.get_end()>=page_floor){
+            return -1;
+        }
         memset.insert_framed_area(VirtAddr::from(start), VirtAddr::from(start+len), permission);
+        0
     }
 
     /// Change the current 'Running' task's program break
@@ -163,6 +173,29 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+        ///获取系统调用次数数组
+        pub fn get_sys_call(&self) -> [u32; MAX_SYSCALL_NUM]{
+            let inner = self.inner.exclusive_access();
+            let current = inner.current_task;
+            inner.tasks[current].call_count
+        }
+        ///在每次系统调用时都为call_count+1
+        pub fn sys_call_add(&self, num: usize) {
+            let mut inner = self.inner.exclusive_access();
+            let current = inner.current_task;
+            if inner.tasks[current].task_status == TaskStatus::Running {
+                inner.tasks[current].call_count[num] += 1;
+            }
+        }
+        ///获取运行时间
+        pub fn get_total_time(&self) -> usize{
+            let inner = self.inner.exclusive_access();
+            let current = inner.current_task;
+            let c_time ;
+            //获取该系统调用时的总时间
+            c_time = get_time_ms() - inner.tasks[current].start_time;
+            c_time
+        }
 }
 
 /// Run the first task in task list.
@@ -176,8 +209,8 @@ fn run_next_task() {
     TASK_MANAGER.run_next_task();
 }
 ///mmap
-pub fn do_mmap(start:usize, len: usize, port: usize){
-    TASK_MANAGER.mmap(start, len, port);
+pub fn do_mmap(start:usize, len: usize, port: usize) -> isize{
+    TASK_MANAGER.mmap(start, len, port)
 }
 /// Change the status of current `Running` task into `Ready`.
 fn mark_current_suspended() {
@@ -214,4 +247,16 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+///为该系统调用号+1
+pub fn sys_call_add(num:usize){
+    TASK_MANAGER.sys_call_add(num);
+}
+///获取总时间
+pub fn get_total_time() -> usize{
+    TASK_MANAGER.get_total_time()
+}
+///获取sys_call数组
+pub fn get_sys_call() -> [u32; MAX_SYSCALL_NUM]{
+    TASK_MANAGER.get_sys_call()
 }
