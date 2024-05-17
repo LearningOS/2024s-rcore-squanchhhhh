@@ -7,10 +7,10 @@
 //! Every task or process has a memory_set to control its virtual memory.
 
 mod address;
-pub mod frame_allocator;
+mod frame_allocator;
 mod heap_allocator;
 mod memory_set;
-pub mod page_table;
+mod page_table;
 
 pub use address::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use address::{StepByOne, VPNRange};
