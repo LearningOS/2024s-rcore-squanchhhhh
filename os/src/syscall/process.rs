@@ -2,7 +2,7 @@
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,do_mmap,sys_call_add,get_sys_call,get_total_time
+        change_program_brk, do_mmap, do_munmap, exit_current_and_run_next, get_sys_call, get_total_time, suspend_current_and_run_next, sys_call_add, TaskStatus
     },
 };
 use core::slice;
@@ -105,24 +105,22 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
     sys_call_add(222);
     // 检查 port 的有效性
-    if port & !0b111 != 0 {
-        panic!("port error!");
+    if port & !0b111 != 0 || start%4096!=0 || port & 0x7 == 0{
+        return -1;
     }
-    // 计算需要的页数
-    let num_pages = if len == 0 {
-        0
-    } else {
-        (len + 4095) / 4096
-    };
-    do_mmap(start, num_pages, port);
-    0
+    println!("start = {} and len = {}",start,len);
+    do_mmap(start, len, port)
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
     sys_call_add(215);
-    -1
+    println!("call munmap!");
+    if _start%4096!=0 || _len%4096!=0{
+        return -1;
+    }
+    do_munmap(_start, _len)
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

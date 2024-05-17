@@ -139,12 +139,21 @@ impl TaskManager {
         //len向上取整
         let page_ceil = VirtAddr(start+len).ceil();
         //判断区间是否重合
-        if memset.get_areas().iter().any(|area| area.get_start()<=page_ceil&&area.get_end()>=page_floor){
+        if memset.get_areas().iter().any(|area| area.get_start()<page_ceil&&area.get_end()>page_floor){
             return -1;
         }
+        println!("mmaped from {} to {}",start,start+len);
         memset.insert_framed_area(VirtAddr::from(start), VirtAddr::from(start+len), permission);
         0
     }
+    /// munmap
+    fn munmap(&self,start: usize, len: usize) -> isize{
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        let memset = inner.tasks[current_task].get_memset();
+        memset.unmap(start, len)
+    }
+
 
     /// Change the current 'Running' task's program break
     pub fn change_current_program_brk(&self, size: i32) -> Option<usize> {
@@ -211,6 +220,10 @@ fn run_next_task() {
 ///mmap
 pub fn do_mmap(start:usize, len: usize, port: usize) -> isize{
     TASK_MANAGER.mmap(start, len, port)
+}
+///munmap
+pub fn do_munmap(start:usize, len: usize) -> isize{
+    TASK_MANAGER.munmap(start, len)
 }
 /// Change the status of current `Running` task into `Ready`.
 fn mark_current_suspended() {
