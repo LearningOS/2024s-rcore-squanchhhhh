@@ -14,9 +14,9 @@ const SYSCALL_READ: usize = 63;
 /// write syscall
 const SYSCALL_WRITE: usize = 64;
 /// exit syscall
-const SYSCALL_EXIT: usize = 93;
+pub const SYSCALL_EXIT: usize = 93;
 /// yield syscall
-const SYSCALL_YIELD: usize = 124;
+pub const SYSCALL_YIELD: usize = 124;
 /// setpriority syscall
 const SYSCALL_SET_PRIORITY: usize = 140;
 /// gettime syscall

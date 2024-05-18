@@ -300,6 +300,33 @@ impl MemorySet {
             false
         }
     }
+    ///get_area
+    pub fn get_areas(&self) -> Vec<VPNRange>{
+        self.areas
+        .iter()
+        .map(|value| value.vpn_range)
+        .collect()
+    }
+    ///unmap
+    pub fn unmap(&mut self,start:usize,len:usize) -> isize{
+        //start向下取整
+        let page_floor = VirtAddr(start).floor();
+        //len向上取整
+        let page_ceil = VirtAddr(start+len).ceil();
+        //解除页表映射
+        let mut to_unmap_indices = Vec::new();
+        for (i, area) in self.areas.iter_mut().enumerate() {
+            if area.vpn_range.get_start() <= page_floor && area.vpn_range.get_end() >= page_ceil {
+                area.unmap(&mut self.page_table);
+                to_unmap_indices.push(i);
+            }
+        }
+        // 从后往前移除元素，以避免索引问题
+        for &i in to_unmap_indices.iter().rev() {
+            self.areas.remove(i);
+        }
+        0
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
@@ -447,3 +474,4 @@ pub fn remap_test() {
         .executable(),);
     println!("remap_test passed!");
 }
+

@@ -8,6 +8,7 @@ const FD_STDOUT: usize = 1;
 
 /// write buf of length `len`  to a file with `fd`
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
+    //sys_call_add(SYSCALL_WRITE);
     trace!("kernel:pid[{}] sys_write", current_task().unwrap().pid.0);
     match fd {
         FD_STDOUT => {
@@ -24,6 +25,7 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
 }
 
 pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
+    //sys_call_add(SYSCALL_READ);
     trace!("kernel:pid[{}] sys_read", current_task().unwrap().pid.0);
     match fd {
         FD_STDIN => {

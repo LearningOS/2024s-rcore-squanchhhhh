@@ -8,7 +8,7 @@ use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
-
+use crate::config::MAX_SYSCALL_NUM;
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -68,6 +68,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    ///增加额外的字段来记录运行时间,在每次轮转到这个进程的时候记录当前时间
+    pub start_time: usize,
+
+    ///记录系统调用的次数
+    pub call_count:[u32; MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlockInner {
@@ -85,6 +91,14 @@ impl TaskControlBlockInner {
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }
+
+    pub fn sys_call_add(&mut self,num:usize){
+        self.call_count[num] += 1;
+    }
+    ///set_parent
+    pub fn set_parent(&mut self,parent:Option<Weak<TaskControlBlock>>){
+        self.parent = parent;
+    }
 }
 
 impl TaskControlBlock {
@@ -93,6 +107,7 @@ impl TaskControlBlock {
     /// At present, it is only used for the creation of initproc
     pub fn new(elf_data: &[u8]) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
+        println!("{}",elf_data.len());
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
@@ -118,6 +133,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    call_count:[0;MAX_SYSCALL_NUM],
+                    start_time:0
                 })
             },
         };
@@ -191,6 +208,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    start_time:0,
+                    call_count:[0;MAX_SYSCALL_NUM],
                 })
             },
         });

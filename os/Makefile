@@ -42,9 +42,10 @@ ifeq ($(OFFLINE),)
 	rustup component add rust-src
 	rustup component add llvm-tools-preview
 endif
-
+# @$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
 $(KERNEL_BIN): kernel
 	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
+
 
 kernel:
 	@make -C ../user build TEST=$(TEST) CHAPTER=$(CHAPTER) BASE=$(BASE)

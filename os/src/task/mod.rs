@@ -20,14 +20,14 @@ mod processor;
 mod switch;
 #[allow(clippy::module_inception)]
 mod task;
-
-use crate::loader::get_app_data_by_name;
+use crate::syscall::SYSCALL_EXIT;
+use crate::{config::MAX_SYSCALL_NUM, loader::get_app_data_by_name, timer::get_time_ms};
 use alloc::sync::Arc;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
-
+use crate::syscall::SYSCALL_YIELD;
 pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
@@ -39,7 +39,7 @@ pub use processor::{
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = take_current_task().unwrap();
-
+    sys_call_add(SYSCALL_YIELD,&task);
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
@@ -61,7 +61,7 @@ pub const IDLE_PID: usize = 0;
 pub fn exit_current_and_run_next(exit_code: i32) {
     // take from Processor
     let task = take_current_task().unwrap();
-
+    sys_call_add(SYSCALL_EXIT,&task);
     let pid = task.getpid();
     if pid == IDLE_PID {
         println!(
@@ -114,4 +114,21 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+
+///添加系统调用信息
+pub fn sys_call_add(num:usize,task:&Arc<TaskControlBlock>){
+    task.inner_exclusive_access().sys_call_add(num);
+}
+///获取syscall
+pub fn get_sys_call()->[u32;MAX_SYSCALL_NUM]{
+    let task = take_current_task().unwrap();
+    return task.inner_exclusive_access().call_count;
+}
+
+///获取总时间
+pub fn get_total_time() -> usize{
+    let task = take_current_task().unwrap();
+    return get_time_ms()-task.inner_exclusive_access().start_time;
 }
