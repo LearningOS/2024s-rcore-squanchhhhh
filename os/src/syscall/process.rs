@@ -1,5 +1,6 @@
 //! Process management syscalls
-use core::ffi::CStr;
+use crate::syscall::SYSCALL_SET_PRIORITY;
+use crate::config::BIGSTRIDE;
 use crate::mm::MapPermission;
 use crate::task::TaskControlBlock;
 use alloc::sync::Arc;
@@ -12,7 +13,6 @@ use crate::{
     }
 };
 use crate::syscall::SYSCALL_FORK;
-use core::ffi::c_char;
 #[repr(C)]
 #[derive(Debug)]
 pub struct TimeVal {
