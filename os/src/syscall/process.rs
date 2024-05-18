@@ -240,27 +240,45 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// 3.添加到tasks
 pub fn sys_spawn(_path: *const u8) -> isize {
     // 记录系统调用
-
     trace!(
         "kernel:pid[{}] sys_spawn called with path {:?}",
         current_task().unwrap().pid.0,
         _path
     );
-
-    // 将路径指针转换为字符串
-    let c_str_path = unsafe { CStr::from_ptr(_path as *const c_char) };
-    let str_path = c_str_path.to_str().unwrap();
-
+    let token = current_user_token();
+    let path = translated_str(token, _path);
+    let str_path = path.as_str();
     // 加载进程
-    let app_data = get_app_data_by_name(str_path).unwrap();
+    let app_data = match get_app_data_by_name(str_path) {
+        Some(data) => data,
+        None => {
+            println!("Failed to load app data for {}", str_path);
+            return -1;
+        }
+    };
+
     let task_block = TaskControlBlock::new(app_data);
 
+    println!("load app length = {}, name = {}", app_data.len(), str_path);
+
     // 设置进程控制块
-    let current_task = current_task().unwrap();
+    let current_task = match current_task() {
+        Some(task) => task,
+        None => {
+            println!("Failed to get current task");
+            return -1;
+        }
+    };
+
+    // 设置父进程
+    println!("process {} set father {}", str_path, current_task.pid.0);
     task_block.inner_exclusive_access().set_parent(Some(Arc::downgrade(&current_task)));
-    sys_call_add(SYSCALL_SPAWN,&current_task);
+    sys_call_add(SYSCALL_SPAWN, &current_task);
+
+
     // 将新任务添加到任务管理器
     let task_block_arc = Arc::new(task_block);
+    current_task.inner_exclusive_access().add_children(task_block_arc.clone());
     add_task(task_block_arc.clone());
 
     // 启动新任务

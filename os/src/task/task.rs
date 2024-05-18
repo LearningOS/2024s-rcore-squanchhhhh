@@ -99,6 +99,11 @@ impl TaskControlBlockInner {
     pub fn set_parent(&mut self,parent:Option<Weak<TaskControlBlock>>){
         self.parent = parent;
     }
+
+    ///add_children
+    pub fn add_children(&mut self,children:Arc<TaskControlBlock>){
+        self.children.push(children);
+    }
 }
 
 impl TaskControlBlock {
