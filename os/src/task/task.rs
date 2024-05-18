@@ -74,6 +74,13 @@ pub struct TaskControlBlockInner {
 
     ///记录系统调用的次数
     pub call_count:[u32; MAX_SYSCALL_NUM],
+
+    ///优先级
+    pub prio:isize,
+///pass
+    pub pass:usize,
+    ///stride
+    pub stride:usize,
 }
 
 impl TaskControlBlockInner {
@@ -99,10 +106,26 @@ impl TaskControlBlockInner {
     pub fn set_parent(&mut self,parent:Option<Weak<TaskControlBlock>>){
         self.parent = parent;
     }
-
-    ///add_children
     pub fn add_children(&mut self,children:Arc<TaskControlBlock>){
         self.children.push(children);
+    }
+    pub fn set_priority(&mut self,num:isize){
+        self.prio = num;
+    }
+    pub fn get_priority(&self) -> isize{
+        self.prio
+    }
+    pub fn set_pass(&mut self,num:usize){
+        self.pass = num;
+    }
+    pub fn get_pass(&self) -> usize{
+        self.pass
+    }
+    pub fn set_stride(&mut self,num:usize){
+        self.stride = num;
+    }
+    pub fn get_stride(&self) -> usize{
+        self.stride
     }
 }
 
@@ -112,7 +135,6 @@ impl TaskControlBlock {
     /// At present, it is only used for the creation of initproc
     pub fn new(elf_data: &[u8]) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        println!("{}",elf_data.len());
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
@@ -139,7 +161,10 @@ impl TaskControlBlock {
                     heap_bottom: user_sp,
                     program_brk: user_sp,
                     call_count:[0;MAX_SYSCALL_NUM],
-                    start_time:0
+                    start_time:0,
+                    prio:16,
+                    pass:0,
+                    stride:0,
                 })
             },
         };
@@ -215,6 +240,9 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                     start_time:0,
                     call_count:[0;MAX_SYSCALL_NUM],
+                    prio:16,
+                    pass:0,
+                    stride:0,
                 })
             },
         });

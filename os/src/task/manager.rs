@@ -21,11 +21,36 @@ impl TaskManager {
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
-    /// Take a process out of the ready queue
+    /// 取出 stride 最小的进程
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        if self.ready_queue.is_empty() {
+            return None;
+        }
+
+        // 找到 stride 最小的进程
+        let mut min_index = 0;
+        let mut min_stride = self.ready_queue[0].inner_exclusive_access().get_stride();
+
+        for (index, task) in self.ready_queue.iter().enumerate() {
+            let stride = task.inner_exclusive_access().get_stride();
+            if stride < min_stride {
+                min_index = index;
+                min_stride = stride;
+            }
+        }
+
+        // 更新选中的进程的 stride 值
+        {
+            let mut task = self.ready_queue[min_index].inner_exclusive_access();
+            let stride = task.get_stride();
+            let pass = task.get_pass();
+            task.set_stride(stride + pass);
+        }
+        // 移除并返回 stride 最小的进程
+        Some(self.ready_queue.remove(min_index).unwrap())
     }
 }
+
 
 lazy_static! {
     /// TASK_MANAGER instance through lazy_static!

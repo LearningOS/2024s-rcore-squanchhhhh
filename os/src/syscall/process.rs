@@ -299,5 +299,9 @@ pub fn sys_set_priority(_prio: isize) -> isize {
     if _prio<2{
         return -1;
     }
-    0
+    let task = current_task().unwrap();
+    sys_call_add(SYSCALL_SET_PRIORITY, &task);
+    task.inner_exclusive_access().set_priority(_prio);
+    task.inner_exclusive_access().set_pass(BIGSTRIDE/(_prio as usize));
+    _prio
 }
