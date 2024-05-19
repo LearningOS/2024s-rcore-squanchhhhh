@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
@@ -71,6 +71,19 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    ///增加额外的字段来记录运行时间,在每次轮转到这个进程的时候记录当前时间
+    pub start_time: usize,
+
+    ///记录系统调用的次数
+    pub call_count:[u32; MAX_SYSCALL_NUM],
+
+    ///优先级
+    pub prio:isize,
+///pass
+    pub pass:usize,
+    ///stride
+    pub stride:usize,
 }
 
 impl TaskControlBlockInner {
@@ -93,6 +106,34 @@ impl TaskControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+    pub fn sys_call_add(&mut self,num:usize){
+        self.call_count[num] += 1;
+    }
+    ///set_parent
+    pub fn set_parent(&mut self,parent:Option<Weak<TaskControlBlock>>){
+        self.parent = parent;
+    }
+    pub fn add_children(&mut self,children:Arc<TaskControlBlock>){
+        self.children.push(children);
+    }
+    pub fn set_priority(&mut self,num:isize){
+        self.prio = num;
+    }
+    pub fn get_priority(&self) -> isize{
+        self.prio
+    }
+    pub fn set_pass(&mut self,num:usize){
+        self.pass = num;
+    }
+    pub fn get_pass(&self) -> usize{
+        self.pass
+    }
+    pub fn set_stride(&mut self,num:usize){
+        self.stride = num;
+    }
+    pub fn get_stride(&self) -> usize{
+        self.stride
     }
 }
 
@@ -135,6 +176,11 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    call_count:[0;MAX_SYSCALL_NUM],
+                    start_time:0,
+                    prio:16,
+                    pass:0,
+                    stride:0,
                 })
             },
         };
@@ -216,6 +262,11 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    call_count:[0;MAX_SYSCALL_NUM],
+                    start_time:0,
+                    prio:16,
+                    pass:0,
+                    stride:0,
                 })
             },
         });

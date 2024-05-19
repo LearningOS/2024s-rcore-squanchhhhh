@@ -3,13 +3,9 @@
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
-    fs::{open_file, OpenFlags},
-    mm::{translated_refmut, translated_str},
-    task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
-    },
+    config::{BIGSTRIDE, MAX_SYSCALL_NUM}, fs::{open_file, OpenFlags}, mm::{translated_refmut, translated_str, MapPermission, VirtAddr}, syscall::{SYSCALL_GET_TIME, SYSCALL_MMAP, SYSCALL_MUNMAP, SYSCALL_SET_PRIORITY, SYSCALL_SPAWN, SYSCALL_TASK_INFO}, task::{
+        add_task, current_task, current_user_token, exit_current_and_run_next, get_sys_call, get_total_time, suspend_current_and_run_next, sys_call_add, TaskControlBlock, TaskStatus
+    }, timer::get_time_us
 };
 
 #[repr(C)]
@@ -118,41 +114,90 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let task = current_task().unwrap();
+    sys_call_add(SYSCALL_GET_TIME,&task);
+    let token = task.get_user_token();
+    let ts = translated_refmut(token, _ts);
+    let us = get_time_us();
+    let time_val = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    *ts = time_val;
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+
     trace!(
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let task = current_task().unwrap();
+    sys_call_add(SYSCALL_TASK_INFO,&task);
+    let token = task.get_user_token();
+    let taskinfo = translated_refmut(token, _ti);
+    (*taskinfo).syscall_times = get_sys_call();
+    (*taskinfo).status = TaskStatus::Running;
+    (*taskinfo).time = get_total_time();
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // 检查 port 的有效性
+    if _port & !0b111 != 0 || _start%4096!=0 || _port & 0x7 == 0{
+        return -1;
+    }
+    //转换地址
+    let page_floor = VirtAddr(_start).floor();
+    let page_ceil = VirtAddr(_start+_len).ceil();
+    let mut permission = MapPermission::from_bits((_port as u8) << 1).unwrap();
+    permission.set(MapPermission::U, true);
+    //获取地址空间
+    let task = current_task().unwrap();
+    sys_call_add(SYSCALL_MMAP,&task);
+    let mut inner = task.inner_exclusive_access();
+    let memset = &mut inner.memory_set;
+    //检查是否有重复
+    if memset.get_areas().iter().any(|area| area.get_start()<page_ceil&&area.get_end()>page_floor){
+        return -1;
+    }
+    memset.insert_framed_area(VirtAddr(_start), VirtAddr(_start+_len), permission);
+    0
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if _start%4096!=0 || _len%4096!=0{
+        return -1;
+    }
+    let task = current_task().unwrap();
+    sys_call_add(SYSCALL_MUNMAP,&task);
+    let mut inner = task.inner_exclusive_access();
+    let memset = &mut inner.memory_set;
+    memset.unmap(_start, _len);
+    0
 }
+
 
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
@@ -166,19 +211,74 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+        "kernel:pid[{}] sys_spawn called with path {:?}",
+        current_task().unwrap().pid.0,
+        path
     );
-    -1
+
+    // 获取当前用户的 token
+    let token = current_user_token();
+
+    // 转换路径字符串
+    let str_path = translated_str(token, path);
+    println!("now reading file {} from fs",str_path);
+    // 打开文件
+    let inode = match open_file(&str_path, OpenFlags::RDONLY) {
+        Some(inode) => inode,
+        None => {
+            println!("Failed to open file: {}", str_path);
+            return -1;
+        }
+    };
+
+    // 读取文件内容
+    let app_data = inode.read_all();
+    println!("load ok");
+    // 获取当前任务
+    let current_task = match current_task() {
+        Some(task) => task,
+        None => {
+            println!("Failed to get current task");
+            return -1;
+        }
+    };
+    sys_call_add(SYSCALL_SPAWN, &current_task);
+    // 创建新的任务控制块并包裹在 Arc 里
+    let new_task = Arc::new(TaskControlBlock::new(app_data.as_slice()));
+
+    {
+        // 设置父任务
+        new_task.inner_exclusive_access().set_parent(Some(Arc::downgrade(&current_task)));
+
+        // 添加子任务到当前任务
+        current_task.inner_exclusive_access().add_children(Arc::clone(&new_task));
+    }
+
+    // 将新任务添加到调度器
+    add_task(Arc::clone(&new_task));
+
+    // 执行新任务
+    new_task.exec(app_data.as_slice());
+
+    // 返回新任务的 PID
+    new_task.pid.0 as isize
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
+    //sys_call_add(SYSCALL_SET_PRIORITY);
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if _prio<2{
+        return -1;
+    }
+    let task = current_task().unwrap();
+    sys_call_add(SYSCALL_SET_PRIORITY, &task);
+    task.inner_exclusive_access().set_priority(_prio);
+    task.inner_exclusive_access().set_pass(BIGSTRIDE/(_prio as usize));
+    _prio
 }

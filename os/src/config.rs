@@ -1,7 +1,8 @@
 //! Constants in the kernel
 
 #[allow(unused)]
-
+///bigstride
+pub const BIGSTRIDE:usize = 10000;
 /// user app's stack size
 pub const USER_STACK_SIZE: usize = 4096 * 2;
 /// kernel stack size
