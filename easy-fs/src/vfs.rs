@@ -30,7 +30,7 @@ impl Inode {
         }
     }
     /// Call a function over a disk inode to read it
-    fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
+    pub fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
         get_block_cache(self.block_id, Arc::clone(&self.block_device))
             .lock()
             .read(self.block_offset, f)
@@ -154,6 +154,48 @@ impl Inode {
             }
             v
         })
+    }
+    /// 创建硬链接，也就是一个新文件指向该inode
+    pub fn create_hard_link(&self, name: &str, target: &str) -> Option<Arc<Inode>> {
+        let mut fs = self.fs.lock();
+    
+        // Find the inode id of the target file
+        let target_inode_id = {
+            let op = |root_inode: &DiskInode| {
+                assert!(root_inode.is_dir());
+                self.find_inode_id(target, root_inode)
+            };
+            self.read_disk_inode(op)?
+        };
+        let op = |root_inode: &DiskInode| {
+            assert!(root_inode.is_dir());
+            self.find_inode_id(name, root_inode)
+        };
+        if self.read_disk_inode(op).is_some() {
+            return None;
+        }
+        
+        self.modify_disk_inode(|root_inode| {
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            let dirent = DirEntry::new(name, target_inode_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+
+        block_cache_sync_all();
+
+        let (block_id, block_offset) = fs.get_disk_inode_pos(target_inode_id);
+        Some(Arc::new(Self::new(
+            block_id,
+            block_offset,
+            self.fs.clone(),
+            self.block_device.clone(),
+        )))
     }
     /// Read data from current inode
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
