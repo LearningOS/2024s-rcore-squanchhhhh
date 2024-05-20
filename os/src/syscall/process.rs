@@ -1,10 +1,9 @@
 //! Process management syscalls
 //!
 use alloc::sync::Arc;
-
 use crate::{
-    config::{BIGSTRIDE, MAX_SYSCALL_NUM}, fs::{open_file, OpenFlags}, mm::{translated_refmut, translated_str, MapPermission, VirtAddr}, syscall::{SYSCALL_GET_TIME, SYSCALL_MMAP, SYSCALL_MUNMAP, SYSCALL_SET_PRIORITY, SYSCALL_SPAWN, SYSCALL_TASK_INFO}, task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next, get_sys_call, get_total_time, suspend_current_and_run_next, sys_call_add, TaskControlBlock, TaskStatus
+    config::{BIGSTRIDE, MAX_SYSCALL_NUM}, fs::{open_file, OpenFlags}, mm::{translated_refmut, translated_str, MapPermission, VirtAddr}, syscall::{ SYSCALL_GET_TIME, SYSCALL_MMAP, SYSCALL_MUNMAP, SYSCALL_SET_PRIORITY, SYSCALL_SPAWN, SYSCALL_TASK_INFO}, task::{
+        add_task, current_task, current_user_token, exit_current_and_run_next, get_sys_call, get_total_time, suspend_current_and_run_next, sys_call_add, TaskStatus
     }, timer::get_time_us
 };
 
@@ -211,60 +210,72 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn called with path {:?}",
-        current_task().unwrap().pid.0,
-        path
-    );
+// pub fn sys_spawn(path: *const u8) -> isize {
+//     trace!(
+//         "kernel:pid[{}] sys_spawn called with path {:?}",
+//         current_task().unwrap().pid.0,
+//         path
+//     );
 
-    // 获取当前用户的 token
-    let token = current_user_token();
+//     // 获取当前用户的 token
+//     let token = current_user_token();
 
-    // 转换路径字符串
-    let str_path = translated_str(token, path);
-    println!("now reading file {} from fs",str_path);
-    // 打开文件
-    let inode = match open_file(&str_path, OpenFlags::RDONLY) {
-        Some(inode) => inode,
-        None => {
-            println!("Failed to open file: {}", str_path);
-            return -1;
-        }
-    };
+//     // 转换路径字符串
+//     let str_path = translated_str(token, path);
+//     // 打开文件
+//     let mut inode = match open_file(&str_path, OpenFlags::RDONLY) {
+//         Some(inode) => inode,
+//         None => {
+//             println!("Failed to open file: {}", str_path);
+//             return -1;
+//         }
+//     };
+//     if let Some(inode_mut) = Arc::get_mut(&mut inode) {
+//         inode_mut.set_offset();
+//     } else {
+//         println!("Failed to get mutable reference to OSInode");
+//         return -1;
+//     }
+//     println!("offset1 : {}",inode.get_offset());
+//     // 读取文件内容
+//     let app_data = inode.read_all();
+//     println!("offset2 : {}",inode.get_offset());
+//     if let Some(inode_mut) = Arc::get_mut(&mut inode) {
+//         inode_mut.set_offset();
+//     } else {
+//         println!("Failed to get mutable reference to OSInode");
+//         return -1;
+//     }
+//     println!("spawn load app : {} lenght : {}",str_path,app_data.len());
+//     // 获取当前任务
+//     let current_task = match current_task() {
+//         Some(task) => task,
+//         None => {
+//             println!("Failed to get current task");
+//             return -1;
+//         }
+//     };
+//     sys_call_add(SYSCALL_SPAWN, &current_task);
+//     // 创建新的任务控制块并包裹在 Arc 里
+//     let new_task = Arc::new(TaskControlBlock::new(app_data.as_slice()));
 
-    // 读取文件内容
-    let app_data = inode.read_all();
-    println!("load ok");
-    // 获取当前任务
-    let current_task = match current_task() {
-        Some(task) => task,
-        None => {
-            println!("Failed to get current task");
-            return -1;
-        }
-    };
-    sys_call_add(SYSCALL_SPAWN, &current_task);
-    // 创建新的任务控制块并包裹在 Arc 里
-    let new_task = Arc::new(TaskControlBlock::new(app_data.as_slice()));
+//     {
+//         // 设置父任务
+//         new_task.inner_exclusive_access().set_parent(Some(Arc::downgrade(&current_task)));
 
-    {
-        // 设置父任务
-        new_task.inner_exclusive_access().set_parent(Some(Arc::downgrade(&current_task)));
+//         // 添加子任务到当前任务
+//         current_task.inner_exclusive_access().add_children(Arc::clone(&new_task));
+//     }
 
-        // 添加子任务到当前任务
-        current_task.inner_exclusive_access().add_children(Arc::clone(&new_task));
-    }
+//     // 将新任务添加到调度器
+//     add_task(Arc::clone(&new_task));
 
-    // 将新任务添加到调度器
-    add_task(Arc::clone(&new_task));
+//     // 执行新任务
+//     new_task.exec(app_data.as_slice());
 
-    // 执行新任务
-    new_task.exec(app_data.as_slice());
-
-    // 返回新任务的 PID
-    new_task.pid.0 as isize
-}
+//     // 返回新任务的 PID
+//     new_task.pid.0 as isize
+// }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
@@ -281,4 +292,26 @@ pub fn sys_set_priority(_prio: isize) -> isize {
     task.inner_exclusive_access().set_priority(_prio);
     task.inner_exclusive_access().set_pass(BIGSTRIDE/(_prio as usize));
     _prio
+}
+pub fn sys_spawn(path: *const u8) -> isize {
+    trace!(
+        "kernel:pid[{}] sys_spawn called with path {:?}",
+        current_task().unwrap().pid.0,
+        path
+    );
+
+    let current_task = current_task().unwrap();
+    sys_call_add(SYSCALL_SPAWN,&current_task);
+    match current_task.spawn(path) {
+        Ok(new_task) => {
+            let new_pid = new_task.pid.0;
+            add_task(new_task);
+            debug!("new_task via spawn {:?}", new_pid);
+            new_pid as isize
+        }
+        Err(_) => {
+            warn!("spawn failed!");
+            -1
+        }
+    }
 }

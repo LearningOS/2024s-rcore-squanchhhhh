@@ -2,14 +2,15 @@
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
-use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::fs::{open_file, File, OpenFlags, Stdin, Stdout};
+use crate::mm::{translated_str, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+
 
 /// Task control block structure
 ///
@@ -286,7 +287,70 @@ impl TaskControlBlock {
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
+    ///spawn
+    pub fn spawn(
+        self: &Arc<TaskControlBlock>,
+        file: *const u8,
+    ) -> Result<Arc<TaskControlBlock>, isize> {
+        let mut parent_inner = self.inner_exclusive_access();
+        let parent_token = parent_inner.get_user_token();
+        let file_name = translated_str(parent_token, file);
+        if let Some(app_inode) = open_file(&file_name.as_str(), OpenFlags::RDONLY) {
+            let elf_data = app_inode.read_all();
+            let (memory_set, user_sp, entry_point) = MemorySet::from_elf(&elf_data);
+            let trap_cx_ppn = memory_set
+                .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
+                .unwrap()
+                .ppn();
+            let pid_handle = pid_alloc();
+            let kernel_stack = kstack_alloc();
+            let kernel_stack_top = kernel_stack.get_top();
 
+            let task_control_block = Arc::new(TaskControlBlock {
+                pid: pid_handle,
+                kernel_stack,
+                inner: unsafe {
+                    UPSafeCell::new(TaskControlBlockInner {
+                        trap_cx_ppn,
+                        base_size: parent_inner.base_size,
+                        task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                        task_status: TaskStatus::Ready,
+                        memory_set,
+                        parent: Some(Arc::downgrade(self)),
+                        children: Vec::new(),
+                        exit_code: 0,
+                        fd_table: vec![
+                        // 0 -> stdin
+                        Some(Arc::new(Stdin)),
+                        // 1 -> stdout
+                        Some(Arc::new(Stdout)),
+                        // 2 -> stderr
+                        Some(Arc::new(Stdout)),
+                    ],
+                        heap_bottom: parent_inner.heap_bottom,
+                        program_brk: parent_inner.program_brk,
+                        call_count:[0;MAX_SYSCALL_NUM],
+                        start_time:0,
+                        prio:16,
+                        pass:0,
+                        stride:0,
+                    })
+                },
+            });
+            parent_inner.children.push(task_control_block.clone());
+            let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
+            *trap_cx = TrapContext::app_init_context(
+                entry_point,
+                user_sp,
+                KERNEL_SPACE.exclusive_access().token(),
+                kernel_stack_top,
+                trap_handler as usize,
+            );
+            return Ok(task_control_block);
+        }else{
+            Err(-1)
+        }
+    }
     /// change the location of the program break. return None if failed.
     pub fn change_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner_exclusive_access();
