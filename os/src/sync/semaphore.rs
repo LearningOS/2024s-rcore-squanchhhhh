@@ -44,7 +44,9 @@ impl Semaphore {
     /// down operation of semaphore
     pub fn down(&self) {
         trace!("kernel: Semaphore::down");
+        let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
         let mut inner = self.inner.exclusive_access();
+        println!("tid {} is waiting ",tid);
         inner.count -= 1;
         if inner.count < 0 {
             inner.wait_queue.push_back(current_task().unwrap());

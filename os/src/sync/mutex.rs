@@ -5,9 +5,10 @@ use crate::task::TaskControlBlock;
 use crate::task::{block_current_and_run_next, suspend_current_and_run_next};
 use crate::task::{current_task, wakeup_task};
 use alloc::{collections::VecDeque, sync::Arc};
-
 /// Mutex trait
 pub trait Mutex: Sync + Send {
+    ///status
+    fn get_status(&self) -> bool;
     /// Lock the mutex
     fn lock(&self);
     /// Unlock the mutex
@@ -29,6 +30,10 @@ impl MutexSpin {
 }
 
 impl Mutex for MutexSpin {
+    /// get status
+    fn get_status(&self) -> bool {
+        *self.locked.exclusive_access()
+    }
     /// Lock the spinlock mutex
     fn lock(&self) {
         trace!("kernel: MutexSpin::lock");
@@ -78,6 +83,10 @@ impl MutexBlocking {
 }
 
 impl Mutex for MutexBlocking {
+    /// get status
+    fn get_status(&self) -> bool {
+        self.inner.exclusive_access().locked
+    }
     /// lock the blocking mutex
     fn lock(&self) {
         trace!("kernel: MutexBlocking::lock");

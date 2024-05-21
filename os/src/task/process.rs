@@ -14,7 +14,8 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
-
+const NUM_SEM: usize = 5;
+const NUM_THREADS: usize = 7;
 /// Process Control Block
 pub struct ProcessControlBlock {
     /// immutable
@@ -49,6 +50,15 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// lock
+    pub lock : bool,
+    ///
+    pub avail:Vec<usize>,
+    ///
+    pub alloc:Vec<Vec<usize>>,
+    ///
+    pub need :Vec<Vec<usize>>
+
 }
 
 impl ProcessControlBlockInner {
@@ -82,6 +92,78 @@ impl ProcessControlBlockInner {
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
+    ///当创建新的资源时调用该方法
+    pub fn update_s(&mut self,sid:usize,num:usize){
+        self.avail[sid] = num;
+    }
+    ///释放资源
+    pub fn release(&mut self,tid:usize,sid:usize){
+        if self.alloc[tid][sid]!=0{
+        self.avail[sid] += 1;
+        self.alloc[tid][sid] -= 1;}
+    }
+    
+
+    ///
+    pub fn detect(&mut self,tid: usize,sid:usize) -> bool{
+
+        println!("begin to detect");
+        println!("avail = {} {} {} {}",self.avail[0],self.avail[1],self.avail[2],self.avail[3]);
+        for i in 0..4{
+            println!("tid = {} s0n = {} s1n = {} s2n = {} s3n = {}",i,self.alloc[i][0],self.alloc[i][1],self.alloc[i][2],self.alloc[i][3]);
+        }
+        self.need[tid][sid] = 1;
+
+        //获取当前的需求
+        let need = &self.need;
+        //构建数组
+        let mut finish = vec![false; NUM_THREADS];
+
+        finish.iter_mut()
+        .enumerate()
+        .filter(|(i, _)|self.alloc[*i].iter().all(|x|*x==0))
+        .for_each(|(_, x)|*x = true);
+
+        let mut availible = self.avail.clone();
+        loop {
+            let mut found = None;
+            for i in 0..NUM_THREADS {
+                if need[i].iter().zip(availible.iter()).all(|(x,y)|*x<=*y) && !finish[i]{
+                    finish[i] = true;
+                    availible.iter_mut().zip(self.alloc[i].iter()).for_each(|(x,y)|*x += *y);
+                    found = Some(i);
+                    break;
+                }
+            }
+            if found.is_none() {
+                break;
+            }
+        }
+        if finish.iter().all(|&f| f){
+            //如果当前未死锁但是信号量不够，则让线程等待
+            if self.avail[sid] <=0{
+                println!("Semaphore not enough");
+                true
+            }else{
+                //如果未死锁并且信号量足够，减少avail，增加alloc[i]
+                self.need[tid][sid] = 0;
+                self.alloc[tid][sid] += 1;
+                self.avail[sid] -= 1;
+                println!("tid = {} get sid = {} ok",tid,sid);
+                println!("current status is :");
+                println!("avail = {} {} {} {}",self.avail[0],self.avail[1],self.avail[2],self.avail[3]);
+                for i in 0..4{
+                    println!("tid = {} s0n = {} s1n = {} s2n = {} s3n = {}",i,self.alloc[i][0],self.alloc[i][1],self.alloc[i][2],self.alloc[i][3]);
+                }
+                true
+            }
+        }else{
+            //如果死锁,返回false
+            println!("not pass");
+            false
+        }
+}
+
 }
 
 impl ProcessControlBlock {
@@ -119,6 +201,11 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    lock:false,
+                    avail:vec![0; NUM_SEM],
+                    need:vec![vec![0; NUM_SEM]; NUM_THREADS],
+                    alloc:vec![vec![0; NUM_SEM]; NUM_THREADS],
+
                 })
             },
         });
@@ -245,6 +332,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    lock:false,
+                    avail:vec![0; NUM_SEM],
+                    need:vec![vec![0; NUM_SEM]; NUM_THREADS],
+                    alloc:vec![vec![0; NUM_SEM]; NUM_THREADS],
                 })
             },
         });
